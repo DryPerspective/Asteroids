@@ -67,6 +67,11 @@ namespace thread_safe {
 			auto _{ std::shared_lock{m_mut} };
 			return m_shape.getOrigin();
 		}
+		void set_origin(sf::Vector2f in) {
+			auto _{ std::shared_lock{m_mut} };
+			m_shape.setOrigin(in);
+		}
+
 		sf::Vector2f get_point(std::size_t point) const {
 			auto _{ std::shared_lock{m_mut} };
 			return m_shape.getPoint(point);
@@ -75,6 +80,7 @@ namespace thread_safe {
 			auto _{ std::shared_lock{m_mut} };
 			return m_shape.getRadius();
 		}
+
 		void rotate(sf::Angle in_angle) {
 			auto _{ std::lock_guard{m_mut} };
 			m_shape.rotate(in_angle);

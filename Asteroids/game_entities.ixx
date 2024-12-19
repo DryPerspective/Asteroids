@@ -213,7 +213,7 @@ namespace game {
 		std::atomic_flag						m_expired;
 
 		static constexpr float size_scale_factor = 10;
-		static constexpr float speed_scale_factor = 0.5f;
+		static constexpr float speed_scale_factor = 0.2f;
 
 	public:
 
@@ -223,6 +223,7 @@ namespace game {
 			: entity{ sf::Vector2f{speed_scale_factor * max_speed, 0}.rotatedBy(initial_angle) }, m_shape{ static_cast<float>(size_scale_factor * initial_size) }, m_size{ initial_size }, m_expired{} {
 
 			m_shape.set_position(initial_position);
+			m_shape.set_origin({ m_shape.get_radius(), m_shape.get_radius() });
 		}
 
 		asteroid(const asteroid& other) : entity{ other.m_vel }, m_shape { other.m_shape }, m_size{ other.m_size.load()}, m_expired{} {

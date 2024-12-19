@@ -163,7 +163,7 @@ int main()
 
     std::jthread spawn_asteroids{ [&dat](std::stop_token tok) {
         std::mt19937 mt{ std::random_device{}() };
-        std::uniform_int_distribution dist{ 500, 800 };
+        std::uniform_int_distribution dist{ 1000, 2500 };
         while (!tok.stop_requested()) {
             dat.add_asteroid();
             std::this_thread::sleep_for(std::chrono::milliseconds{ dist(mt) });

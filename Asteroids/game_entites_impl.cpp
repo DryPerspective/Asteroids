@@ -429,7 +429,7 @@ namespace game {
 	}
 
 	void data::tick() {
-		auto dummy{std::make_unique<asteroid>( sf::Vector2f{0,0}, sf::degrees(0), 0)};
+		std::unique_ptr<asteroid> dummy{ nullptr };
 		while (m_incoming_asteroids.try_pop(dummy)) {
 			m_asteroids.push_back(std::move(dummy));
 		}
