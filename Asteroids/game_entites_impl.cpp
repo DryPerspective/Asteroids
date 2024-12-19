@@ -5,7 +5,12 @@ module;
 
 module game_entities;
 
-import ts_shape;
+import ts_prng;
+
+//We share a generator for all game entities
+//In the general case this might have issues, but here we are confident that the lifetime of the generator
+//will be approximately equal to the lifetime of the program.
+thread_safe::random_generator<float> prng_gen{};
 
 
 namespace game {
@@ -42,11 +47,26 @@ namespace game {
 		return m_expired.test();
 	}
 
-	void projectile::tick(const game::data& wdw) {
+	void projectile::tick(game::data& wdw) {
 		m_shape.move(m_vel * tick_rate);
 		if (!shape_within_bounds(*this, wdw.window_size())) {
 			m_expired.test_and_set();
+			return;
 		}
+
+		//Let's talk collisions
+		//Projectiles are the fastest objects in the game and all move at the same speed
+		//As such, they can never collide with the player or each other.
+		//So if we get a collision it means it must be with an asteroid
+		//For now we're only testing
+		auto collision_reaction = [&, this](std::unique_ptr<asteroid>& ent) {
+			if (is_collided(*ent.get())) {
+				std::println("Collision detected");
+				ent->on_collision(wdw);
+				m_expired.test_and_set();
+			}
+		};
+		wdw.for_all_asteroids(collision_reaction);
 	}
 
 	sf::Vector2f projectile::get_position() const {
@@ -58,9 +78,17 @@ namespace game {
 	}
 
 	sf::Vector2f projectile::get_start_vel(sf::Angle rot) {
-		//We want a velocity for which a projectile takes 2 seconds to cross the screen.
-		//Each tick, it moves vel * tick_rate
-		return sf::Vector2f{ -2 / tick_rate, 0 }.rotatedBy(rot);
+		//We want projectiles to travel at the max speed allowed by the simulation, because this
+		//allows us to simplify certain things through assumptions which hold because of it
+		//e.g. projectiles cannot collide with other projectiles, or the player.
+		return sf::Vector2f{ -max_speed, 0 }.rotatedBy(rot);
+	}
+
+	bool projectile::is_collided(const game::entity& ent) const {
+		//A projectile always travels front-first and the front is the first part which will collide
+		//We can refine our collision function for it
+		auto front = m_shape.get_transform().transformPoint(m_shape.get_point(0));
+		return (front - ent.get_position()).length() <= ent.get_radius();
 	}
 
 
@@ -74,7 +102,7 @@ namespace game {
 		return m_expired.test();
 	}
 
-	void asteroid::tick(const game::data& wdw) {
+	void asteroid::tick(game::data& wdw) {
 		m_shape.move(m_vel * tick_rate);
 
 		//We need to know whether to cull an asteroid. Since they all start offscreen we can't just
@@ -102,6 +130,27 @@ namespace game {
 
 	float asteroid::get_radius() const {
 		return m_shape.get_radius();
+	}
+
+	void asteroid::on_collision(game::data& dat) {
+		// This may look racey, but this function is the only one which can
+		// alter the size member, and it will not be called concurrently with itself
+		auto current_size = m_size.load();
+		//If the asteroid is already as small as it's going to be, just kill it
+		if (current_size == 1) {
+			m_expired.test_and_set();
+			return;
+		}
+
+		//Get a random phase angle for new asteroids to spawn in
+		auto phase{ sf::degrees(prng_gen(0.0f, 180.0f))};
+		//Create two new asteroids going in opposite directions
+		dat.add_asteroid(asteroid{ get_position(), phase, current_size - 1});
+		dat.add_asteroid(asteroid{ get_position(), phase - sf::degrees(180), current_size - 1 });
+
+		//And mark this one as dead
+		m_expired.test_and_set();
+
 	}
 
 	//PLAYER FUNCTIONS---------------------------------------------------------------
@@ -144,23 +193,11 @@ namespace game {
 	}
 
 
-	void player::move(float quantity, const game::data& dat) {
-		auto _{ std::lock_guard{m_mut} };
-		/*
-		auto pos = m_shape.get_position() + sf::Vector2f{ -quantity, 0 }.rotatedBy(m_shape.get_rotation());
-		if (shape_within_bounds(pos, get_radius(), dat.window_size())) {
-			m_shape.set_position(pos);
-		}
-		*/
-		m_accel += sf::Vector2f{ -quantity,0 }.rotatedBy(m_shape.get_rotation()) * speed_scale_factor;
-	}
-
 	void player::rotate(float in) {
 		rotate(sf::degrees(in));
 	}
 
 	void player::shoot(game::data& dat) {
-		auto _{ std::lock_guard{m_mut} };
 		static std::chrono::steady_clock::time_point last_shot{}; //Default ctor sets to the clock's epoch
 		if ((std::chrono::steady_clock::now() - last_shot) < time_between_shots) return;
 
@@ -168,19 +205,50 @@ namespace game {
 		dat.add_projectile(m_shape.get_transform().transformPoint(m_shape.get_point(2)), m_shape.get_rotation());
 	}
 
-	void player::tick(const game::data& dat) {
+	void player::tick(game::data& dat) {
+
 		auto _{ std::lock_guard{m_mut} };
+
+		//The max speed of the player is 95% that of the maximum allowed by the game
+		const bool under_max_speed = m_vel.length() <= max_speed * 0.95f;
+
+		//One could argue that this is TOCTOU, but I would prefer each tick to operate on a consistent
+		//snapshot of one moment as it is/was at the time the function was called, rather than
+		//potentially many states being processed between the call to tick and the function evaluating them.
+		const auto movement{ static_cast<move_state>(m_movement.load(std::memory_order_acquire)) };
+		//If going forward, we accelerate 
+		if (movement & move_state::forward_down && under_max_speed) {
+			m_accel += sf::Vector2f{ -10,0 }.rotatedBy(m_shape.get_rotation()) * speed_scale_factor;
+		}
+		//If backwards we accelerate backwards
+		else if (movement & move_state::backward_down && under_max_speed) {
+			m_accel += sf::Vector2f{ 10,0 }.rotatedBy(m_shape.get_rotation()) * speed_scale_factor;
+		}
+		//Otherwise we dampen speed and decelerate
+		else if (m_vel.lengthSquared() > 0) {
+			m_accel = sf::Vector2f{ -10, 0 }.rotatedBy(m_vel.angle()) * speed_scale_factor * 10.0f;
+		}
+
+		//If we're rotating, we rotate
+		if (movement & move_state::left_down) {
+			m_shape.rotate(-turn_angle);
+		}
+		else if (movement & move_state::right_down) {
+			m_shape.rotate(turn_angle);
+		}
+
+		//And if we're shooting, we shoot
+		if (movement & move_state::shoot_down) {
+			shoot(dat);
+		}
 		auto new_vel{ m_vel + (m_accel * tick_rate) };
 		//Calculate what the new position will be
 		auto new_pos { m_shape.get_position() + new_vel * tick_rate };
 		//If that position would be inside the bounds of the window
 		if (shape_within_bounds(new_pos, get_radius(), dat.window_size())) {
-			//Update stats and dampen acceleration
 			m_shape.set_position(new_pos);
 			m_vel = new_vel;
-			if (m_vel.lengthSquared() > std::numeric_limits<float>::epsilon()) {
-				m_accel = m_accel * -0.75f;				
-			}
+
 		}
 		//Otherwise
 		else {
@@ -214,6 +282,47 @@ namespace game {
 		return (m_shape.get_origin() - m_shape.get_point(3)).length();
 	}
 
+	void player::set(move_state in) {
+		m_movement.fetch_or(std::to_underlying(in), std::memory_order_acq_rel);
+	}
+	void player::clear(move_state in) {
+		//Who doesn't love implicit integer promotions
+		auto cleared_value = static_cast<std::underlying_type_t<move_state>>(~std::to_underlying(in));
+		m_movement.fetch_and(cleared_value, std::memory_order_acq_rel);		
+	}
+
+	void player::forward_down() {
+		set(move_state::forward_down);
+	}
+	void player::forward_up() {
+		clear(move_state::forward_down);
+	}
+
+	void player::backward_down() {
+		set(move_state::backward_down);
+	}
+	void player::backward_up() {
+		clear(move_state::backward_down);
+	}
+
+	void player::left_down() {
+		set(move_state::left_down);
+	}
+	void player::left_up() {
+		clear(move_state::left_down);
+	}
+	void player::right_down() {
+		set(move_state::right_down);
+	}
+	void player::right_up() {
+		clear(move_state::right_down);
+	}
+	void player::shoot_down() {
+		set(move_state::shoot_down);
+	}
+	void player::shoot_up() {
+		clear(move_state::shoot_down);
+	}
 
 
 	//DATA FUNCTIONS-----------------------------------------------------------------
@@ -230,9 +339,7 @@ namespace game {
 		//First we grab a belt around the edges of the screen
 		auto [size_x, size_y] = m_window.get_size();
 		//And a position within it
-		static std::mt19937_64 mt{ std::random_device{}() };
-		static std::uniform_real_distribution<float> pos_dist{0.0f, 10.0f};
-		auto x_rand{ pos_dist(mt) };
+		auto x_rand{ prng_gen(0.0f, 10.0f) };
 		//We want them coming from all angles, so we cut the result in half
 		float x_pos{};
 		if (x_rand < 5) {
@@ -242,7 +349,7 @@ namespace game {
 			x_pos = size_x + x_rand;
 		}
 
-		auto y_rand{ pos_dist(mt) };
+		auto y_rand{ prng_gen(0.0f, 10.0f) };
 		float y_pos{};
 		if (y_rand < 0.5) {
 			y_pos = -y_rand;
@@ -254,36 +361,44 @@ namespace game {
 		sf::Vector2f pos{ x_pos, y_pos };
 
 		//Then we want a velocity which points towards the centre of the screen but is peturbed a little
-		static std::uniform_int_distribution vel_dist{ -30, 30 };
-		sf::Vector2f velocity = sf::Vector2f{ static_cast<float>(size_x) / 2, static_cast<float>(size_y) / 2 } - pos.rotatedBy(sf::degrees(static_cast<float>(vel_dist(mt))));
-		//Scale initial velocity
-		velocity *= asteroid::speed_scale_factor;
+		sf::Vector2f velocity = sf::Vector2f{ static_cast<float>(size_x) / 2, static_cast<float>(size_y) / 2 } - pos.rotatedBy(sf::degrees(prng_gen(-30.0f, 30.0f)));
 
-		m_entities.emplace_back(std::in_place_type<game::asteroid>, sf::Vector2f{ x_pos, y_pos }, velocity, 3 );
+		m_incoming_asteroids.push(std::make_unique<game::asteroid>(sf::Vector2f{ x_pos, y_pos }, velocity.angle(), 3));
 
 	}
 
+	void data::add_asteroid(asteroid&& in) {
+		m_incoming_asteroids.push(std::make_unique<asteroid>(std::move(in)));
+	}
+
 	void data::kill_expired() {
-		m_entities.erase_if([](polymorphic<game::entity>& ent) {
-			return ent->is_expired();
-		});
+		auto eraser = [](auto& entity) {
+			return entity->is_expired();
+		};
+		m_entities.erase_if(eraser);
+		m_asteroids.erase_if(eraser);
+
 	}
 
 	void data::draw_all() {
 		//Fight lambda rules on capturing members
-		m_entities.for_each(std::bind_front([](game::data& dat, polymorphic<game::entity>& ent) {
+		auto draw_func{ std::bind_front([](game::data& dat, auto& ent) {
 			ent->draw(dat);
-		}, std::ref(*this)));
+		}, std::ref(*this)) };
+		m_entities.for_each(draw_func);
+		m_asteroids.for_each(draw_func);
 	}
 
-	void data::tick_all() {
-		m_entities.for_each(std::bind_front([](game::data& dat, polymorphic<game::entity>& ent) {
+	void data::tick_entities() {
+		auto ticker{ std::bind_front([](game::data& dat, auto& ent) {
 			ent->tick(dat);
-		}, std::ref(*this)));
+		}, std::ref(*this)) };
+		m_entities.for_each(ticker);
+		m_asteroids.for_each(ticker);
 	}
 
 	std::size_t data::num_entities() const {
-		return m_entities.size();
+		return m_entities.size() + m_asteroids.size();
 	}
 
 	void data::draw_entity(const sf::Shape& entity) {
@@ -311,6 +426,13 @@ namespace game {
 	}
 	void data::clear(sf::Color colour) {
 		m_window.clear(colour);
+	}
+
+	void data::tick() {
+		auto dummy{std::make_unique<asteroid>( sf::Vector2f{0,0}, sf::degrees(0), 0)};
+		while (m_incoming_asteroids.try_pop(dummy)) {
+			m_asteroids.push_back(std::move(dummy));
+		}
 	}
 
 
