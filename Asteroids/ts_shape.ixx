@@ -6,6 +6,15 @@ export module ts_shape;
 
 import std;
 
+
+template<typename T>
+concept sf_StringLike = requires(T t, sf::String str) {
+	{ t.getString() } -> std::convertible_to<sf::String>;
+	t.setString(str);
+
+};
+
+
 namespace thread_safe {
 	//The best level of granularity is locking on access to the shape
 	export template<typename Shape>
@@ -94,6 +103,28 @@ namespace thread_safe {
 		auto get_transform() const {
 			auto _{ std::shared_lock{m_mut} };
 			return m_shape.getTransform();
+		}
+
+		sf::String get_string() const requires sf_StringLike<Shape> {
+			auto _{ std::shared_lock{m_mut} };
+			return m_shape.getString();
+		}
+		void set_string(sf::String in) requires sf_StringLike<Shape> {
+			auto _{ std::lock_guard{m_mut} };
+			m_shape.setString(std::move(in));
+		}
+		auto get_character_size() const requires sf_StringLike<Shape> {
+			auto _{ std::shared_lock{m_mut} };
+			return m_shape.getCharacterSize();
+		}
+		void set_character_size(unsigned int in) requires sf_StringLike<Shape> {
+			auto _{ std::lock_guard{m_mut} };
+			m_shape.setCharacterSize(in);
+		}
+
+		auto get_global_bounds() const {
+			auto _{ std::shared_lock{m_mut} };
+			return m_shape.getGlobalBounds();
 		}
 	};
 

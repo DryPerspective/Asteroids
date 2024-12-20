@@ -6,6 +6,7 @@ module;
 module game_entities;
 
 import ts_prng;
+import polymorphic;
 
 //We share a generator for all game entities
 //In the general case this might have issues, but here we are confident that the lifetime of the generator
@@ -31,7 +32,6 @@ namespace game {
 			|| (x + radius) > max_x || (y + radius > max_y));
 	}
 
-
 	//PROJECTILE FUNCTIONS------------------------------------------------------
 	projectile& projectile::operator=(const projectile& other){
 		m_shape = other.m_shape;
@@ -48,11 +48,14 @@ namespace game {
 	}
 
 	void projectile::tick(game::data& wdw) {
+		auto lck{ std::unique_lock{m_mut} };
 		m_shape.move(m_vel * tick_rate);
+		lck.unlock();
 		if (!shape_within_bounds(*this, wdw.window_size())) {
 			m_expired.test_and_set();
 			return;
 		}
+
 
 		//Let's talk collisions
 		//Projectiles are the fastest objects in the game and all move at the same speed
@@ -61,8 +64,15 @@ namespace game {
 		//For now we're only testing
 		auto collision_reaction = [&, this](std::unique_ptr<asteroid>& ent) {
 			if (is_collided(*ent.get())) {
-				std::println("Collision detected");
 				ent->on_collision(wdw);
+				
+				wdw.add_score(score_per_asteroid);
+				temp_text scorecard{ std::chrono::milliseconds{500}, sf::Vector2f{0,-50}, std::to_string(score_per_asteroid)};
+				scorecard.set_character_size(10);
+				scorecard.set_position(ent->get_position() - sf::Vector2f{30, 0});
+				
+				wdw.add_entity(polymorphic<entity>{std::move(scorecard)});
+
 				m_expired.test_and_set();
 			}
 		};
@@ -91,6 +101,9 @@ namespace game {
 		return (front - ent.get_position()).length() <= ent.get_radius();
 	}
 
+	void projectile::set_position(sf::Vector2f in) {
+		default_set_position(m_shape, in);
+	}
 
 	//ASTEROID FUNCTIONS-------------------------------------------------------------
 
@@ -106,7 +119,6 @@ namespace game {
 		m_shape.move(m_vel * tick_rate);
 
 		//We need to know whether to cull an asteroid. Since they all start offscreen we can't just
-		//check if they're offscreen to know when to cull them
 		//check if they're offscreen to know when to cull them
 		//While we could play games with swapping states of "has been in bounds", a semantically cleaner solution
 		//is to cull any asteroids which get more than 10% off the side of the screen.
@@ -126,6 +138,10 @@ namespace game {
 
 	sf::Vector2f asteroid::get_position() const {
 		return m_shape.get_position();
+	}
+
+	void asteroid::set_position(sf::Vector2f in) {
+		default_set_position(m_shape, in);
 	}
 
 	float asteroid::get_radius() const {
@@ -152,6 +168,8 @@ namespace game {
 		m_expired.test_and_set();
 
 	}
+
+	
 
 	//PLAYER FUNCTIONS---------------------------------------------------------------
 	sf::ConvexShape player::create_player() {
@@ -328,7 +346,7 @@ namespace game {
 	//DATA FUNCTIONS-----------------------------------------------------------------
 
 	void data::add_projectile(sf::Vector2f position, sf::Angle rotation) {
-		m_entities.emplace_back(std::in_place_type<game::projectile>, position, rotation );
+		m_incoming_entities.push(polymorphic<game::entity>{std::in_place_type<game::projectile>, position, rotation });
 	}
 
 	void data::add_asteroid() {
@@ -387,6 +405,8 @@ namespace game {
 		}, std::ref(*this)) };
 		m_entities.for_each(draw_func);
 		m_asteroids.for_each(draw_func);
+		m_score_object.draw(*this);
+		
 	}
 
 	void data::tick_entities() {
@@ -433,9 +453,79 @@ namespace game {
 		while (m_incoming_asteroids.try_pop(dummy)) {
 			m_asteroids.push_back(std::move(dummy));
 		}
+		//We need a dummy entity to assign to
+		polymorphic<entity> dummy_entity{ std::in_place_type<projectile>, sf::Vector2f{0,0}, sf::degrees(0) };
+		while (m_incoming_entities.try_pop(dummy_entity)) {
+			m_entities.push_back(std::move(dummy_entity));
+		}
+		m_score_object.set_string(get_score_string(m_game_score.load(std::memory_order_acquire)));
 	}
 
+	void data::add_entity(polymorphic<game::entity>&& new_entity) {
+		m_incoming_entities.push(std::move(new_entity));
+	}
 
+	std::string data::get_score_string(int score) const {
+		return std::format("Score: {:0>5}", score);
+	}
+
+	void data::add_score(int in) {
+		m_game_score.fetch_add(in, std::memory_order_acq_rel);
+	}
+
+	//TEXT---------------------------------------------------------------------
+	void text::draw(game::data& wdw) const {
+		auto _{ std::shared_lock{m_mut} };
+		wdw.draw_entity(m_text);
+	}
+	bool text::is_expired() const {
+		return m_expired.test();
+	}
+	void text::tick(game::data& wdw) {
+		auto lck{ std::lock_guard{m_mut} };
+		m_text.move(m_vel * tick_rate);
+		if (!shape_within_bounds(*this, wdw.window_size())) {
+			m_expired.test_and_set();
+			return;
+		}
+	}
+	sf::Vector2f text::get_position() const {
+		return m_text.get_position();
+	}
+	void text::set_position(sf::Vector2f in) {
+		default_set_position(m_text, in);
+	}
+	float text::get_radius() const {
+		return static_cast<float>(m_text.get_character_size());
+	}
+
+	unsigned int text::get_character_size() const {
+		return m_text.get_character_size();
+	}
+	void text::set_character_size(unsigned int in) {
+		m_text.set_character_size(in);
+	}
+
+	sf::FloatRect text::get_global_bounds() const {
+		return m_text.get_global_bounds();
+	}
+
+	void text::set_string(sf::String in) {
+		m_text.set_string(in);
+	}
+	sf::String text::get_string() const {
+		return m_text.get_string();
+	}
+
+	//TEMP-TEXT---------------------------------------------------
+	void temp_text::tick(game::data& wdw) {
+		text::tick(wdw);	
+		auto _{ std::lock_guard{m_mut} };
+		if (std::chrono::high_resolution_clock::now() - m_start_time >= m_lifetime_ms) {
+			m_expired.test_and_set();
+		}
+		
+	}
 
 }
 

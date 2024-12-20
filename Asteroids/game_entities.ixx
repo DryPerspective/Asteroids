@@ -21,6 +21,10 @@ import ts_queue;
 import polymorphic;
 
 
+
+
+
+
 //A "thread-safe" window class which locks on access, since requests to draw may originate from multiple threads.
 //not needed as at present all objects live on the main thread and all calls to draw come from there.
 //
@@ -47,6 +51,11 @@ namespace thread_safe {
 			auto _{ std::lock_guard{m_mut} };
 			shp.draw(m_window);
 		}
+		template<typename T> requires std::derived_from<T, sf::Drawable>
+		void draw(const T& data) {
+			auto _{ std::lock_guard{m_mut} };
+			m_window.draw(data);
+		}
 
 
 
@@ -54,72 +63,22 @@ namespace thread_safe {
 }
 
 
+template<typename T, typename WindowType = sf::RenderWindow>
+concept drawable = requires(T t, WindowType wdw) {
+	wdw.draw(t);
+};
+
+//A few sense checks
+static_assert(drawable<thread_safe::shape<sf::CircleShape>, thread_safe::window>);
+static_assert(drawable<sf::Text, thread_safe::window>);
+
 
 namespace game {
 
-	class entity;
-	class asteroid;
+	constexpr inline int score_per_asteroid = 100;
+
+	class data;
 	
-	//Not 100% sold on this design, but it provides an easy way to encapsulate the core elements which ultimately other threads are going to need to be able to access
-	export class data {
-		//You may ask - at this current moment in time we are only storing projectiles here, so why not a vector of just projectiles?
-		//The simple answer is futureproofing.
-		//If we split to just asteroids and projectiles, then wanted to add a new entity later (e.g. floating score text)
-		//then we'd need yet another vector.
-		//Asteroids are the special case, projectiles are not. So they should go in the general storage.
-		thread_safe::vector<polymorphic<game::entity>>	m_entities;
-		thread_safe::window								m_window;
-
-		//The only collisions which exist are with asteroids
-		//So we keep a separate tally of the asteroids in the simulation. This gives us two benefits
-		//The first is that we don't check collisions between things which are never going to collide anyway
-		//The second is it allows us to easily avoid locks when scanning down the list of entities from within the list of entities.
-		thread_safe::vector<std::unique_ptr<asteroid>> m_asteroids;
-		thread_safe::queue<std::unique_ptr<asteroid>> m_incoming_asteroids;
-		
-
-
-	public:
-
-		explicit data(sf::RenderWindow&& wdw) : m_window{ std::move(wdw) } {}
-
-		//ENTITY MANAGEMENT-------------------------------------------
-
-		void add_projectile(sf::Vector2f position, sf::Angle rotation);
-		void add_asteroid();
-		void add_asteroid(asteroid&& in);
-		void kill_expired();
-
-		void draw_all();
-		void tick_entities();
-
-		void draw_entity(const sf::Shape& entity);
-		template<typename T>
-		void draw_entity(const thread_safe::shape<T>& shp) {
-			m_window.draw(shp);
-		}
-
-		std::size_t num_entities() const;
-		sf::Vector2u window_size() const;
-		bool is_open() const;
-		void close();
-		std::optional<sf::Event> poll_event();
-		void display();
-		void clear(sf::Color = sf::Color::Black);
-
-		//We need to special case the asteroids a little
-		//to track collisions
-		template<typename Func>
-		void for_all_asteroids(Func&& func) {
-			m_asteroids.for_each(std::forward<Func>(func));
-		}
-
-		void tick();
-
-	};
-
-
-
 	export class entity {
 
 	protected:
@@ -136,6 +95,13 @@ namespace game {
 		//However, each entity may have a different type of drawable thing, not necessarily with a common base (which is useful, anyway)
 		//And position is composited into that SFML shape.
 		//So instead, we can't. Ah well.
+
+		//If I could choose I wouldn't be doing it this way, but I can't.
+		//Our hands are tied by the design choices of SFML
+		template<typename T>
+		void default_set_position(T& entity, sf::Vector2f new_pos) {
+			entity.set_position(new_pos);
+		}
 
 	public:
 
@@ -155,6 +121,7 @@ namespace game {
 
 		//We can still require position is queriable though
 		virtual sf::Vector2f get_position() const = 0;
+		virtual void set_position(sf::Vector2f) = 0;
 
 		//And while each shape may be different, acquiring their radii will vastly simplify things
 		virtual float get_radius() const = 0;
@@ -201,8 +168,8 @@ namespace game {
 		bool is_expired() const override;
 		void tick(game::data& wdw) override;
 		sf::Vector2f get_position() const override;
+		void set_position(sf::Vector2f new_pos) override;
 		float get_radius() const override;
-
 		bool is_collided(const entity& other) const override;
 
 	};
@@ -240,10 +207,71 @@ namespace game {
 		bool is_expired() const override;
 		void tick(game::data& wdw) override;
 		sf::Vector2f get_position() const override;
+		void set_position(sf::Vector2f new_pos) override;
 		float get_radius() const override;
 		
 		//Kill this asteroid and spawn two others one size smaller
 		void on_collision(game::data& dat);
+
+	};
+
+	class text : public entity {
+
+		//This throws on failure, but we don't have a lot of good options if we do fail
+		sf::Font									m_font{ "assets/PressStart2P-vaV7.ttf" };
+		thread_safe::shape<sf::Text>				m_text;
+	protected:
+		std::atomic_flag		m_expired{};
+
+	public:
+
+		text(sf::String in_str) : entity{ {0,0} }, m_text { m_font, in_str } {}
+		text(sf::Vector2f in_vel, sf::String in_str) : entity{ in_vel }, m_text{ m_font, in_str } {}
+
+		text(const text& other) : entity{ other.m_vel }, m_font { other.m_font }, m_text{ m_font, other.m_text.get_string(), other.get_character_size()} {
+			m_text.set_position(other.m_text.get_position());
+		}
+		text& operator=(const text& other) {
+			auto _{ std::scoped_lock{m_mut, other.m_mut} };
+			m_font = other.m_font;
+			m_text = sf::Text{ m_font, other.m_text.get_string() };
+			if (other.m_expired.test()) {
+				m_expired.test_and_set();
+			}
+		}
+
+		text(text&&) noexcept = default;
+		text& operator=(text&&) noexcept = default;
+
+		void draw(game::data& wdw) const override;
+		bool is_expired() const override;
+		void tick(game::data& wdw) override;
+		sf::Vector2f get_position() const override;
+		void set_position(sf::Vector2f new_pos) override;
+		float get_radius() const override;
+		constexpr bool is_collided(const entity& other) const override { 
+			//Text doesn't experience collision
+			return false;
+		}
+
+		virtual unsigned int get_character_size() const;
+		virtual void set_character_size(unsigned int);
+		sf::FloatRect get_global_bounds() const;
+		void set_string(sf::String in);
+		sf::String get_string() const;
+
+
+	};
+
+	class temp_text : public text {
+		std::chrono::duration<double>						m_lifetime_ms;
+		std::chrono::high_resolution_clock::time_point		m_start_time;
+
+	public:
+		temp_text(std::chrono::duration<double> lifetime_ms, sf::Vector2f vel, sf::String in_text)
+			: text{ vel, in_text }, m_lifetime_ms{ lifetime_ms }, m_start_time{ std::chrono::high_resolution_clock::now() } {}
+
+		void tick(game::data&) override;
 
 	};
 
@@ -290,7 +318,7 @@ namespace game {
 
 		//SFML boilerplate
 		void rotate(sf::Angle angle);
-		void set_position(sf::Vector2f new_position);
+		void set_position(sf::Vector2f new_position) override;
 		void draw(game::data& in) const override;
 
 		//Overrides
@@ -317,6 +345,85 @@ namespace game {
 		void shoot_down();
 		void shoot_up();
 
+
+	};
+
+	//Not 100% sold on this design, but it provides an easy way to encapsulate the core elements which ultimately other threads are going to need to be able to access
+	export class data {
+		//You may ask - at this current moment in time we are only storing projectiles here, so why not a vector of just projectiles?
+		//The simple answer is futureproofing.
+		//If we split to just asteroids and projectiles, then wanted to add a new entity later (e.g. floating score text)
+		//then we'd need yet another vector.
+		//Asteroids are the special case, projectiles are not. So they should go in the general storage.
+		//Because we are in a situation where we may want to add new entities as part of an operation which is iterating over
+		//existing enterties, it is simpler to add incoming ones to a queue which is then safely appended en masse later on (in tick).
+		thread_safe::vector<polymorphic<game::entity>>	m_entities;
+		thread_safe::queue<polymorphic<game::entity>>	m_incoming_entities;
+
+
+		thread_safe::window								m_window;
+
+		//The only collisions which exist are with asteroids
+		//So we keep a separate tally of the asteroids in the simulation. This gives us two benefits
+		//The first is that we don't check collisions between things which are never going to collide anyway
+		//The second is it allows us to easily avoid locks when scanning down the list of entities from within the list of entities.
+		thread_safe::vector<std::unique_ptr<asteroid>> m_asteroids;
+		thread_safe::queue<std::unique_ptr<asteroid>>  m_incoming_asteroids;
+
+		std::atomic<int>							   m_game_score{0};
+		game::text									   m_score_object{ get_score_string(0) };
+
+
+		std::string get_score_string(int score) const;
+
+
+
+	public:
+
+		explicit data(sf::RenderWindow&& wdw) : m_window{ std::move(wdw) } {
+			m_score_object.set_character_size(20);
+			auto [top_left, size] = m_score_object.get_global_bounds();
+			auto [bounds_x, bounds_y] = m_window.get_size();
+			//We nudge it downwards a tiny bit from the top of the screen, just to prevent it clipping into the window
+			m_score_object.set_position({ bounds_x - size.x - 5, 5 });
+		}
+
+		//ENTITY MANAGEMENT-------------------------------------------
+
+		void add_projectile(sf::Vector2f position, sf::Angle rotation);
+		void add_asteroid();
+		void add_asteroid(asteroid&& in);
+		void kill_expired();
+
+		void draw_all();
+		void tick_entities();
+
+		void draw_entity(const sf::Shape& entity);
+		template<typename T> requires drawable<T, thread_safe::window>
+		void draw_entity(const T& shp) {
+			m_window.draw(shp);
+		}
+
+		std::size_t num_entities() const;
+		sf::Vector2u window_size() const;
+		bool is_open() const;
+		void close();
+		std::optional<sf::Event> poll_event();
+		void display();
+		void clear(sf::Color = sf::Color::Black);
+
+		//We need to special case the asteroids a little
+		//to track collisions
+		template<typename Func>
+		void for_all_asteroids(Func&& func) {
+			m_asteroids.for_each(std::forward<Func>(func));
+		}
+
+		void add_entity(polymorphic<game::entity>&& new_entity);
+
+		void tick();
+
+		void add_score(int in);
 
 	};
 

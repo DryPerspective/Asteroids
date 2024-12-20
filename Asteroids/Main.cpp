@@ -1,4 +1,5 @@
 #include <SFML/Graphics.hpp>
+#include <SFML/Graphics/Text.hpp>
 
 
 
@@ -147,7 +148,6 @@ public:
 
 int main()
 {
-
     unsigned int win_x{ 500 };
     unsigned int win_y{ 500 };
 
