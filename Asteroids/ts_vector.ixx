@@ -22,20 +22,20 @@ namespace thread_safe {
 			auto _{ std::lock_guard{other.m_mut} };
 			m_vec = other.m_vec;
 		}
+		vector& operator=(const vector& other) {
+			auto _{ std::scoped_lock{m_mut, other.m_mut} };
+			m_vec = other.m_vec;
+		}
 
 		void push_back(auto&& new_elem) {
 			auto _{ std::lock_guard{m_mut} };
 			m_vec.push_back(std::forward<decltype(new_elem)>(new_elem));
 		}
 
-		void push_back(const T& new_elem) {
+		template<typename U> requires std::convertible_to<U ,T>
+		void push_back(U&& new_elem) {
 			auto _{ std::lock_guard{m_mut} };
-			m_vec.push_back(new_elem);
-		}
-
-		void push_back(T&& new_elem) {
-			auto _{ std::lock_guard{m_mut} };
-			m_vec.push_back(std::move(new_elem));
+			m_vec.push_back(std::forward<U>(new_elem));
 		}
 
 		template<typename... Args> requires std::constructible_from<T, Args...>

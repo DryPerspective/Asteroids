@@ -41,7 +41,10 @@ namespace thread_safe {
 			return *this;
 		}
 
-		shape(shape&&) noexcept = default;
+		shape(shape&& other) noexcept {
+			auto _{ std::shared_lock{other.m_mut} };
+			m_shape = std::move(other.m_shape);
+		}
 		shape& operator=(shape&& other) noexcept {
 			auto _{ std::scoped_lock{m_mut, other.m_mut} };
 			m_shape = std::move(other.m_shape);
