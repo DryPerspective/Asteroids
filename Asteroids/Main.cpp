@@ -137,22 +137,29 @@ int main()
     std::latch starting_line{ number_of_threads };
 
     std::jthread game_process_thread{ [&](std::stop_token tok) {
+        //This is a hot loop. Not necessarily the best practice, however we expect it will take
+        //more time to sleep and reawaken the thread ticks_per_second times per second than it will to just keep spinning.
         constexpr auto tick_interval {std::chrono::milliseconds{1000} / ticks_per_second};
         starting_line.arrive_and_wait();
+        auto loop_start = std::chrono::steady_clock::now();
         while (!tok.stop_requested()) {
-            auto loop_start = std::chrono::steady_clock::now();
-            player_keys key{};
-            if (control_input.try_pop(key)) {
-                if (key == player_keys::eof) return;
-                translate_keypress_to_player_action(p, key);
+            //If we're in time for a tick
+            if (std::chrono::steady_clock::now() - loop_start > tick_interval) {
+                loop_start = std::chrono::steady_clock::now();
+                player_keys key{};
+                if (control_input.try_pop(key)) {
+                    if (key == player_keys::eof) return;
+                    translate_keypress_to_player_action(p, key);
+                }
+                p.tick(dat);
+                dat.kill_expired();
+                dat.tick();
             }
-            p.tick(dat);
-            dat.kill_expired();
-            dat.tick();
+            else {
+                std::this_thread::yield();
+            }
 
-            if (auto loop_end = std::chrono::steady_clock::now(); loop_end - loop_start < tick_interval) {
-                std::this_thread::sleep_for(tick_interval - (loop_end - loop_start));
-            }
+
         }
     } };
 
