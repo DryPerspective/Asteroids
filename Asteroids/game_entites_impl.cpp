@@ -416,6 +416,10 @@ namespace game {
 		m_entities.for_each(draw_func);
 		m_asteroids.for_each(draw_func);
 		m_score_object.draw(*this);
+
+		if (m_game_over_screen.has_value()) {
+			m_game_over_screen->draw(*this);
+		}
 		
 	}
 
@@ -472,9 +476,7 @@ namespace game {
 				screen_middle.x -= 140;
 				screen_middle.y -= 15;
 				m_game_over_screen->set_position(screen_middle);
-				m_game_over_screen->draw(*this);
 			}
-			m_game_over_screen->draw(*this);
 		}
 		else {
 			std::unique_ptr<asteroid> dummy{ nullptr };
