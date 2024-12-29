@@ -225,6 +225,8 @@ namespace game {
 
 	void player::tick(game::data& dat) {
 
+		if(dat.game_is_over()) return;
+
 		auto _{ std::lock_guard{m_mut} };
 
 		//The max speed of the player is 95% that of the maximum allowed by the game
@@ -289,6 +291,14 @@ namespace game {
 			m_shape.move((sf::Vector2f{ static_cast<float>(bounds_x) / 2, static_cast<float>(bounds_y) /2 } - m_shape.get_position()) * 0.01f);
 		}
 
+
+		//Then process collisions
+		auto collision_visitor = [&, this](std::unique_ptr<asteroid>& ent) {
+			if (is_collided(*ent.get())) {
+				dat.game_over();
+			}
+		};
+		dat.for_all_asteroids(collision_visitor);
 
 
 	}
@@ -449,16 +459,38 @@ namespace game {
 	}
 
 	void data::tick() {
-		std::unique_ptr<asteroid> dummy{ nullptr };
-		while (m_incoming_asteroids.try_pop(dummy)) {
-			m_asteroids.push_back(std::move(dummy));
+		//If the game is over, we stop processing and 
+		if (m_game_over.test()) {
+			if (not m_game_over_screen.has_value()) {
+				m_game_over_screen.emplace(game_over_screen{});
+				m_game_over_screen->set_character_size(30);
+				auto screen_middle = [](thread_safe::window& wdw) {
+					auto [bounds_x, bounds_y] = wdw.get_size();
+					return sf::Vector2f{ bounds_x / 2.0f, bounds_y / 2.0f };
+				}(m_window);
+				//Adjust per the size of the characters we have
+				screen_middle.x -= 140;
+				screen_middle.y -= 15;
+				m_game_over_screen->set_position(screen_middle);
+				m_game_over_screen->draw(*this);
+			}
+			m_game_over_screen->draw(*this);
 		}
-		//We need a dummy entity to assign to
-		polymorphic<entity> dummy_entity{ std::in_place_type<projectile>, sf::Vector2f{0,0}, sf::degrees(0) };
-		while (m_incoming_entities.try_pop(dummy_entity)) {
-			m_entities.push_back(std::move(dummy_entity));
+		else {
+			std::unique_ptr<asteroid> dummy{ nullptr };
+			while (m_incoming_asteroids.try_pop(dummy)) {
+				m_asteroids.push_back(std::move(dummy));
+			}
+			//We need a dummy entity to assign to
+			polymorphic<entity> dummy_entity{ std::in_place_type<projectile>, sf::Vector2f{0,0}, sf::degrees(0) };
+			while (m_incoming_entities.try_pop(dummy_entity)) {
+				m_entities.push_back(std::move(dummy_entity));
+			}
+			m_score_object.set_string(get_score_string(m_game_score.load(std::memory_order_acquire)));
+
+			tick_entities();
+
 		}
-		m_score_object.set_string(get_score_string(m_game_score.load(std::memory_order_acquire)));
 	}
 
 	void data::add_entity(polymorphic<game::entity>&& new_entity) {
@@ -471,6 +503,13 @@ namespace game {
 
 	void data::add_score(int in) {
 		m_game_score.fetch_add(in, std::memory_order_acq_rel);
+	}
+
+	void data::game_over() {
+		m_game_over.test_and_set();
+	}
+	bool data::game_is_over() const {
+		return m_game_over.test();
 	}
 
 	//TEXT---------------------------------------------------------------------

@@ -197,7 +197,6 @@ int main()
         p.draw(dat);   
         
         dat.kill_expired();
-        dat.tick_entities();
         dat.tick();
         
         dat.draw_all();

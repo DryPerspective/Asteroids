@@ -26,7 +26,6 @@ import polymorphic;
 
 
 //A "thread-safe" window class which locks on access, since requests to draw may originate from multiple threads.
-//not needed as at present all objects live on the main thread and all calls to draw come from there.
 //
 //NB: Not exported
 namespace thread_safe {
@@ -348,15 +347,41 @@ namespace game {
 
 	};
 
+
+
+
+
+
 	//Not 100% sold on this design, but it provides an easy way to encapsulate the core elements which ultimately other threads are going to need to be able to access
 	export class data {
-		//You may ask - at this current moment in time we are only storing projectiles here, so why not a vector of just projectiles?
-		//The simple answer is futureproofing.
-		//If we split to just asteroids and projectiles, then wanted to add a new entity later (e.g. floating score text)
-		//then we'd need yet another vector.
-		//Asteroids are the special case, projectiles are not. So they should go in the general storage.
-		//Because we are in a situation where we may want to add new entities as part of an operation which is iterating over
-		//existing enterties, it is simpler to add incoming ones to a queue which is then safely appended en masse later on (in tick).
+
+		class game_over_screen {
+			game::text m_game_over_text{ "GAME OVER" };
+			//More may be added later
+
+		public:
+			game_over_screen() = default;
+
+			void set_position(sf::Vector2f new_pos) {
+				m_game_over_text.set_position(new_pos);
+			}
+			sf::Vector2f get_position() const {
+				return m_game_over_text.get_position();
+			}
+			void set_character_size(unsigned int new_size) {
+				m_game_over_text.set_character_size(new_size);
+			}
+			void draw(game::data& dat) {
+				m_game_over_text.draw(dat);
+			}
+		};
+
+
+
+
+
+		//Asteroids are a special case because only they can collide
+		//Everything else is stored here
 		thread_safe::vector<polymorphic<game::entity>>	m_entities;
 		thread_safe::queue<polymorphic<game::entity>>	m_incoming_entities;
 
@@ -373,10 +398,16 @@ namespace game {
 		std::atomic<int>							   m_game_score{0};
 		game::text									   m_score_object{ get_score_string(0) };
 
+		//May change to a enum for multiple gamestates later
+		std::atomic_flag							   m_game_over{};
+		std::optional<game_over_screen>				   m_game_over_screen{ std::nullopt };
 
+
+		//Turn a score number into an appropriate string to display
 		std::string get_score_string(int score) const;
 
-
+		//Tick specifically the asteroids and game entities
+		void tick_entities();
 
 	public:
 
@@ -396,7 +427,7 @@ namespace game {
 		void kill_expired();
 
 		void draw_all();
-		void tick_entities();
+
 
 		void draw_entity(const sf::Shape& entity);
 		template<typename T> requires drawable<T, thread_safe::window>
@@ -424,6 +455,9 @@ namespace game {
 		void tick();
 
 		void add_score(int in);
+
+		void game_over();
+		bool game_is_over() const;
 
 	};
 
