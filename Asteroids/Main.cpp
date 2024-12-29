@@ -19,6 +19,7 @@ import std;
 */
 
 constexpr std::ptrdiff_t number_of_threads{ 3 };
+constexpr std::ptrdiff_t ticks_per_second{ 500 };
 
 enum class player_keys {
     none,
@@ -79,66 +80,39 @@ player_keys map_player_key_release(sf::Keyboard::Scan in) {
 }
 
 
-
-
-
-
-class input_processor {
-    thread_safe::queue<player_keys>&     m_queue;
-    game::player&                               m_player;
-    game::data&                                 m_data;
-    
-
-public:
-
-
-    explicit input_processor(thread_safe::queue<player_keys>& in_q, game::player& in_c, game::data& in_dat) : m_queue{ in_q }, m_player{ in_c }, m_data{ in_dat } {}
-
-    void operator()(std::stop_token tok) {
-        while (!tok.stop_requested()) {
-            player_keys code{};
-            m_queue.wait_pop(code);
-
-            switch (code) {
-            case player_keys::eof:
-                return;
-            case player_keys::forward_pressed:
-                m_player.forward_down();
-                break;
-            case player_keys::backward_pressed:
-                m_player.backward_down();
-                break;
-            case player_keys::forward_released:
-                m_player.forward_up();
-                break;
-            case player_keys::backward_released:
-                m_player.backward_up();
-                break;
-            case player_keys::left_pressed:
-                m_player.left_down();
-                break;
-            case player_keys::left_released:
-                m_player.left_up();
-                break;
-            case player_keys::right_pressed:
-                m_player.right_down();
-                break;
-            case player_keys::right_released:
-                m_player.right_up();
-                break;
-            case player_keys::shoot_pressed:
-                m_player.shoot_down();
-                break;
-            case player_keys::shoot_released:
-                m_player.shoot_up();
-            }
-
-
-
-        }
+void translate_keypress_to_player_action(game::player& player, player_keys keypress) {
+    switch (keypress) {
+    case player_keys::forward_pressed:
+        player.forward_down();
+        break;
+    case player_keys::backward_pressed:
+        player.backward_down();
+        break;
+    case player_keys::forward_released:
+        player.forward_up();
+        break;
+    case player_keys::backward_released:
+        player.backward_up();
+        break;
+    case player_keys::left_pressed:
+        player.left_down();
+        break;
+    case player_keys::left_released:
+        player.left_up();
+        break;
+    case player_keys::right_pressed:
+        player.right_down();
+        break;
+    case player_keys::right_released:
+        player.right_up();
+        break;
+    case player_keys::shoot_pressed:
+        player.shoot_down();
+        break;
+    case player_keys::shoot_released:
+        player.shoot_up();
     }
-
-};
+}
 
 
 
@@ -159,12 +133,34 @@ int main()
     game::player p({ 100, 100 }, dat);
 
     thread_safe::queue<player_keys> control_input{};
-    std::jthread input_thread{ input_processor{ control_input, p, dat} };
 
-    std::jthread spawn_asteroids{ [&dat](std::stop_token tok) {
-        std::mt19937 mt{ std::random_device{}() };
-        std::uniform_int_distribution dist{ 1000, 2500 };
+    std::latch starting_line{ number_of_threads };
+
+    std::jthread game_process_thread{ [&](std::stop_token tok) {
+        constexpr auto tick_interval {std::chrono::milliseconds{1000} / ticks_per_second};
+        starting_line.arrive_and_wait();
         while (!tok.stop_requested()) {
+            auto loop_start = std::chrono::steady_clock::now();
+            player_keys key{};
+            if (control_input.try_pop(key)) {
+                if (key == player_keys::eof) return;
+                translate_keypress_to_player_action(p, key);
+            }
+            p.tick(dat);
+            dat.kill_expired();
+            dat.tick();
+
+            if (auto loop_end = std::chrono::steady_clock::now(); loop_end - loop_start < tick_interval) {
+                std::this_thread::sleep_for(tick_interval - (loop_end - loop_start));
+            }
+        }
+    } };
+
+    std::jthread spawn_asteroids{ [&dat, &starting_line](std::stop_token tok) {
+        std::mt19937 mt{ std::random_device{}() };
+        std::uniform_int_distribution dist{ 1000, 2000 };
+        starting_line.arrive_and_wait();
+        while (!tok.stop_requested() && !dat.game_is_over()) {
             dat.add_asteroid();
             std::this_thread::sleep_for(std::chrono::milliseconds{ dist(mt) });
         }
@@ -172,6 +168,7 @@ int main()
 
     std::uint8_t tick_count{};
 
+    starting_line.arrive_and_wait();
     while (++tick_count, dat.is_open()) {
         while (const auto event = dat.poll_event()) {
             if (event->getIf<sf::Event::Closed>()) {
@@ -193,18 +190,18 @@ int main()
 
         dat.clear(sf::Color::Black);
 
-        p.tick(dat);
+        //p.tick(dat);
         p.draw(dat);   
         
-        dat.kill_expired();
-        dat.tick();
+        //dat.kill_expired();
+        //dat.tick();
         
         dat.draw_all();
         
         dat.display();
 
 
-        std::println("{}", dat.num_entities());
+        //std::println("{}", dat.num_entities());
 
     }
 
