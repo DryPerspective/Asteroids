@@ -27,11 +27,6 @@ namespace thread_safe {
 			m_vec = other.m_vec;
 		}
 
-		void push_back(auto&& new_elem) {
-			auto _{ std::lock_guard{m_mut} };
-			m_vec.push_back(std::forward<decltype(new_elem)>(new_elem));
-		}
-
 		template<typename U> requires std::convertible_to<U ,T>
 		void push_back(U&& new_elem) {
 			auto _{ std::lock_guard{m_mut} };
