@@ -16,6 +16,41 @@ thread_safe::random_generator<float> prng_gen{};
 
 namespace game {
 
+	class dot : public entity {
+		thread_safe::shape<sf::CircleShape> m_shape;
+
+	public:
+		dot(sf::Vector2f position) : entity{ { 0, 0 } }, m_shape{ 5.0f } {
+			m_shape.set_position(position);
+		}
+
+		dot(const dot& other) : entity{ other.m_vel }, m_shape{ other.m_shape } {}
+
+		bool is_expired() const override {
+			return false;
+		}
+
+		void draw(game::data& dat) const override {
+			dat.draw_entity(m_shape);
+		};
+
+		//Process a single tick 
+		void tick(game::data&) override {};
+
+		//We can still require position is queriable though
+		sf::Vector2f get_position() const override {
+			return m_shape.get_position();
+		}
+		void set_position(sf::Vector2f in) override {
+			m_shape.set_position(in);
+		}
+
+		//And while each shape may be different, acquiring their radii will vastly simplify things
+		float get_radius() const override {
+			return m_shape.get_radius();
+		}
+	};
+
 	//FREE FUNCTIONS-------------------------------------------------------------
 
 	bool shape_within_bounds(const game::entity& ent, sf::Vector2u wdw) {
@@ -30,6 +65,50 @@ namespace game {
 
 		return not ((x - radius) < 0 || (y - radius) < 0
 			|| (x + radius) > max_x || (y + radius > max_y));
+	}
+
+	bool collides_with_line(sf::Vector2f point_a, sf::Vector2f point_b, const asteroid& other) {
+		//Calculating if any part of the circle intersects a line is workable - we draw an imaginary right-angled triangle
+		//from the circle's centre to the line. We then calculate the length of the line from our triangle edge to the circle center
+		//If it's smaller than the radius, we have an intersection.
+		auto c_vector{ point_a - other.get_position() }; //Hypoteneuse
+		auto p_vector{ point_a - point_b };			     //Length of side of triangle. Contains the adjacent but length may differ
+
+		//We know that P dot C = |P||C|cos(theta) where theta is the angle between the hypotenuse and the adjacent
+		//We also know that cos(theta) = adjacent / hypoteneuse.
+		//So P * C = |P||C| a / |C|
+		//Which falls out at a = P * C / |P|
+		auto inner_product = [](sf::Vector2f lhs, sf::Vector2f rhs) {
+			return (lhs.x * rhs.x) + (lhs.y * rhs.y);
+		};
+		auto adjacent_length = inner_product(p_vector, c_vector) / p_vector.length();
+		
+		//Which then means that trusty old pythagoras can get us the length of the opposite
+		
+		//But, there is a minor hitch. We only care about a circle which subtends that line when it happens between the two points.
+		//The line itself may continue to stretch to infinity, but we don't want to track collisions on that infinite line
+		
+		//First check - recall that a negative inner product means an angle of greater than 90 degrees between the lines.
+		//We don't want these
+		if (adjacent_length > 0) {
+			//Second check - we want to ensure that the opposite we're looking for is within the length of the line
+			//This is also simple
+			if (adjacent_length < p_vector.length()) {
+				//Now we're back to Pythagoras
+				if (std::sqrt(c_vector.lengthSquared() - adjacent_length * adjacent_length) <= other.get_radius()) return true;
+			}
+		}
+		return false;
+	}
+
+	//ENTITY FUNCTIONS----------------------------------------------------------
+
+	bool entity::is_collided(const asteroid& other) const {
+		//The most basic detection is to model our two objects as two circles
+		//This may be refined on a per-class basis
+		auto distance_between_centers{ (get_position() - other.get_position()).length() };
+		auto sum_of_radii{ get_radius() + other.get_radius() };
+		return distance_between_centers <= sum_of_radii;
 	}
 
 	//PROJECTILE FUNCTIONS------------------------------------------------------
@@ -94,7 +173,7 @@ namespace game {
 		return sf::Vector2f{ -max_speed, 0 }.rotatedBy(rot);
 	}
 
-	bool projectile::is_collided(const game::entity& ent) const {
+	bool projectile::is_collided(const game::asteroid& ent) const {
 		//A projectile always travels front-first and the front is the first part which will collide
 		//We can refine our collision function for it
 		auto front = m_shape.get_transform().transformPoint(m_shape.get_point(0));
@@ -225,6 +304,11 @@ namespace game {
 
 	void player::tick(game::data& dat) {
 
+		auto transformed_point = [this](std::size_t idx) {
+			return m_shape.get_transform().transformPoint(m_shape.get_point(idx));
+		};
+
+
 		if(dat.game_is_over()) return;
 
 		auto _{ std::lock_guard{m_mut} };
@@ -318,6 +402,35 @@ namespace game {
 		auto cleared_value = static_cast<std::underlying_type_t<move_state>>(~std::to_underlying(in));
 		m_movement.fetch_and(cleared_value, std::memory_order_acq_rel);		
 	}
+
+	//Detecting collisions better
+	bool player::is_collided(const asteroid& other) const {
+		//We model the overall player model as a triangle. This remains imperfect but is better than a circle
+		//May return later and model it as two triangles.
+		//In this case, we need our three collision points (1-3)
+		auto transformed_point = [this](std::size_t idx) {
+			return m_shape.get_transform().transformPoint(m_shape.get_point(idx));
+		};
+		std::array<sf::Vector2f, 3> points{ transformed_point(1), transformed_point(2), transformed_point(3) };
+		//First test - do any points exist within the asteroid?
+		for (const auto& point : points) {
+			if ((point - other.get_position()).length() < other.get_radius()) return true;
+		}
+		
+		//Otherwise we want to test if any part of the circle subtends any line which makes up our triangle
+
+
+
+		//Since we're handspinning we put in a check to make sure future optimizations don't break this
+		static_assert(points.size() == 3, "Player collision calculation expects exactly 3 points");
+
+		return
+				collides_with_line(points[0], points[1], other)
+			||	collides_with_line(points[0], points[2], other)
+			||	collides_with_line(points[1], points[2], other);;
+
+	}
+
 
 	void player::forward_down() {
 		set(move_state::forward_down);

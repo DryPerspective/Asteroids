@@ -77,6 +77,7 @@ namespace game {
 	constexpr inline int score_per_asteroid = 100;
 
 	class data;
+	class asteroid;
 	
 	export class entity {
 
@@ -126,13 +127,12 @@ namespace game {
 		virtual float get_radius() const = 0;
 
 		//Whether we have collided with another entity
-		virtual bool is_collided(const entity& other) const {
-			//The most basic detection is to model our two objects as two circles
-			//This may be refined on a per-class basis
-			auto distance_between_centers{ (get_position() - other.get_position()).length() };
-			auto sum_of_radii {get_radius() + other.get_radius()};
-			return distance_between_centers <= sum_of_radii;
-		}
+		//We are able to sidestep the obvious issue of the signature not knowing what other entity we collided with
+		//through game design - only projectiles and the player can collide, and only with asteroids.
+		//Since an asteroid is always (approximately) a circle we can override these functions for
+		//projectile and player, and know the only meaningful other entity will be an asteroid.
+		//Todo: Consider replacing entity with asteroid
+		virtual bool is_collided(const asteroid& other) const;
 
 	};
 
@@ -169,7 +169,7 @@ namespace game {
 		sf::Vector2f get_position() const override;
 		void set_position(sf::Vector2f new_pos) override;
 		float get_radius() const override;
-		bool is_collided(const entity& other) const override;
+		bool is_collided(const asteroid& other) const override;
 
 	};
 
@@ -248,7 +248,7 @@ namespace game {
 		sf::Vector2f get_position() const override;
 		void set_position(sf::Vector2f new_pos) override;
 		float get_radius() const override;
-		constexpr bool is_collided(const entity& other) const override { 
+		constexpr bool is_collided(const asteroid& other) const override { 
 			//Text doesn't experience collision
 			return false;
 		}
@@ -329,6 +329,9 @@ namespace game {
 		sf::Vector2f get_position() const override;
 		float get_radius() const override;
 
+		//We can specialise collision because the player very much does not resemble a circle
+		bool is_collided(const asteroid& other) const override;
+
 		//To track smooth movement we can't just perform a single action
 		//on a single keypress. We instead need to track the current state
 		//of the key and act accordingly.
@@ -346,6 +349,13 @@ namespace game {
 
 
 	};
+
+	//A general-purpose function to determine whether an asteroid subtends a given line
+	//NB: This is not the entire collision calculation required for an arbitrary shape
+	//but a useful part of it.
+	//Were we in header-land I'd keep this private in a TU since it's arguably internal
+	//But other classes may have use of it, so it remains here and non-exported
+	bool collides_with_line(sf::Vector2f point_a, sf::Vector2f point_b, const asteroid& asteroid);
 
 
 
