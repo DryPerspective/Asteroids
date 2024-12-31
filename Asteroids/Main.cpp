@@ -19,7 +19,7 @@ import std;
 */
 
 constexpr std::ptrdiff_t number_of_threads{ 3 };
-constexpr std::ptrdiff_t ticks_per_second{ 500 };
+constexpr std::ptrdiff_t ticks_per_second{ 600 };
 
 enum class player_keys {
     none,
@@ -122,7 +122,7 @@ void translate_keypress_to_player_action(game::player& player, player_keys keypr
 
 int main()
 {
-    unsigned int win_x{ 500 };
+    unsigned int win_x{ 1000 };
     unsigned int win_y{ 500 };
 
     sf::RenderWindow main_window{ sf::VideoMode({win_x, win_y}), "My Window" };
