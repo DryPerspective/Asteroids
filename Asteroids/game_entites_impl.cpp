@@ -17,6 +17,7 @@ thread_safe::random_generator<float> prng_gen{};
 
 TODO("Replace asteroid circles with sprites")
 TODO("Shrink player")
+TODO("Check asteroid spawning")
 
 namespace game {
 
@@ -99,8 +100,6 @@ namespace game {
 			return (lhs.x * rhs.x) + (lhs.y * rhs.y);
 		};
 		auto adjacent_length = inner_product(p_vector, c_vector) / p_vector.length();
-
-		TODO("Optimise player collision calculation")
 		
 		//Which then means that trusty old pythagoras can get us the length of the opposite
 		
@@ -424,6 +423,18 @@ namespace game {
 
 	//Detecting collisions better
 	bool player::is_collided(const asteroid& other) const {
+
+		//The first test is simple - a player which is more than a few radii away from any asteroid
+		//is not colliding with it. This will save us needing to do potentially expensive calculations later
+		//To avoid a sqrt we just square up both sides, so go from
+		//sqrt((ax - bx)^2 + (ay - by)^2) > 3r
+		//(ax - bx)^2 + (ay - by)^2 > 9r^2
+		
+		auto test_radius = get_radius() + other.get_radius();
+		if ((get_position() - other.get_position()).lengthSquared() > 9 * test_radius * test_radius) return false;
+		
+
+
 		//We model the overall player model as a triangle. This remains imperfect but is better than a circle
 		//May return later and model it as two triangles.
 		//In this case, we need our three collision points (1-3)
@@ -437,8 +448,6 @@ namespace game {
 		}
 		
 		//Otherwise we want to test if any part of the circle subtends any line which makes up our triangle
-
-
 
 		//Since we're handspinning we put in a check to make sure future optimizations don't break this
 		static_assert(points.size() == 3, "Player collision calculation expects exactly 3 points");
@@ -523,7 +532,7 @@ namespace game {
 		//Then we want a velocity which points towards the centre of the screen but is peturbed a little
 		sf::Vector2f velocity = sf::Vector2f{ static_cast<float>(size_x) / 2, static_cast<float>(size_y) / 2 } - pos.rotatedBy(sf::degrees(prng_gen(-30.0f, 30.0f)));
 
-		m_incoming_asteroids.push(std::make_unique<game::asteroid>(sf::Vector2f{ x_pos, y_pos }, velocity.angle(), 3));
+		m_incoming_asteroids.push(std::make_unique<game::asteroid>(sf::Vector2f{ x_pos, y_pos }, velocity.angle(), asteroid::initial_asteroid_size));
 
 	}
 

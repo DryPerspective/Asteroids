@@ -178,11 +178,13 @@ namespace game {
 		std::atomic<int>						m_size;
 		std::atomic_flag						m_expired;
 
-		static constexpr float size_scale_factor = 10;
-		static constexpr float speed_scale_factor = 0.2f;
+
 
 	public:
 
+		static constexpr int   initial_asteroid_size = 3;
+		static constexpr float size_scale_factor = 10;
+		static constexpr float speed_scale_factor = 0.2f;
 		
 
 		explicit asteroid(sf::Vector2f initial_position, sf::Angle initial_angle, int initial_size) 
