@@ -13,7 +13,7 @@ import polymorphic;
 //We share a generator for all game entities
 //In the general case this might have issues, but here we are confident that the lifetime of the generator
 //will be approximately equal to the lifetime of the program.
-thread_safe::random_generator<float> prng_gen{};
+thread_safe::uniform_generator prng_gen{};
 
 TODO("Replace asteroid circles with sprites")
 TODO("Shrink player")

@@ -10,18 +10,19 @@ namespace thread_safe {
 	//We need to be able to generate random numbers in a thread_safe context
 	//This raises some questions and a few options were considered, but ultimately
 	//this was the design which was the best of the bunch
-	export template<prng_suitable_numerical ValType = int, std::uniform_random_bit_generator Generator = std::mt19937_64>
-	class random_generator {
+	export template<std::uniform_random_bit_generator Generator = std::mt19937_64>
+	class uniform_generator {
 
 		Generator m_gen;
 		std::mutex m_mut{};
 
 	public:
-		random_generator() : m_gen{ std::random_device{}() } {}
-		random_generator(Generator&& gen) : m_gen{ std::move(gen) } {}
+		uniform_generator() : m_gen{ std::random_device{}() } {}
+		uniform_generator(Generator&& gen) : m_gen{ std::move(gen) } {}
 
 		//It's suboptimal that we have to lock on every random number generation, even that across different ranges
 		//But it's worse to spin a fresh generator for every range requested by the user
+		template<prng_suitable_numerical ValType = int>
 		auto operator()(ValType min, ValType max) {
 			auto _{ std::lock_guard{m_mut} };
 			//Distributions are cheap and (mostly) stateless, so can be created and destroyed on the fly
@@ -35,6 +36,7 @@ namespace thread_safe {
 				return dist(m_gen);
 			}
 		}
+		template<prng_suitable_numerical ValType = int>
 		auto operator()(ValType max) {
 			return operator()(static_cast<ValType>(0), max);
 		}
