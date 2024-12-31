@@ -3,6 +3,8 @@ module;
 //In theory not necessarily since it's in the global fragment elsewhere, but MSVC complains
 #include "SFML/Graphics.hpp"
 
+#include "todo_reminder.h"
+
 module game_entities;
 
 import ts_prng;
@@ -13,31 +15,47 @@ import polymorphic;
 //will be approximately equal to the lifetime of the program.
 thread_safe::random_generator<float> prng_gen{};
 
+TODO("Replace asteroid circles with sprites")
+TODO("Shrink player")
 
 namespace game {
 
 	class dot : public entity {
 		thread_safe::shape<sf::CircleShape> m_shape;
 
+		std::atomic_flag m_has_expired{};
+		std::chrono::duration<double> m_lifetime;
+		std::chrono::steady_clock::time_point m_start{ std::chrono::steady_clock::now() };
+
 	public:
-		dot(sf::Vector2f position) : entity{ { 0, 0 } }, m_shape{ 5.0f } {
+		dot(sf::Vector2f position, std::chrono::duration<double> lifetime = std::chrono::seconds{ 2 }) 
+				: entity{ {0, 0} }, m_shape{ 5.0f } {
 			m_shape.set_position(position);
 		}
 
-		dot(const dot& other) : entity{ other.m_vel }, m_shape{ other.m_shape } {}
+		dot(const dot& other) : entity{ other.m_vel }, m_shape{ other.m_shape }, m_lifetime{ other.m_lifetime } {
+			if (other.m_has_expired.test()) m_has_expired.test_and_set();
+		}
+		dot& operator=(const dot& other) {
+			auto _{ std::scoped_lock{m_mut, other.m_mut} };
+			m_vel = other.m_vel;
+			m_shape = other.m_shape;
+			m_lifetime = other.m_lifetime;
+			if (other.m_has_expired.test()) m_has_expired.test_and_set();
+		}
 
 		bool is_expired() const override {
-			return false;
+			return m_has_expired.test();
 		}
 
 		void draw(game::data& dat) const override {
 			dat.draw_entity(m_shape);
 		};
 
-		//Process a single tick 
-		void tick(game::data&) override {};
+		void tick(game::data&) override {
+			if (std::chrono::steady_clock::now() > (m_start + m_lifetime)) m_has_expired.test_and_set();
+		};
 
-		//We can still require position is queriable though
 		sf::Vector2f get_position() const override {
 			return m_shape.get_position();
 		}
@@ -45,7 +63,6 @@ namespace game {
 			m_shape.set_position(in);
 		}
 
-		//And while each shape may be different, acquiring their radii will vastly simplify things
 		float get_radius() const override {
 			return m_shape.get_radius();
 		}
@@ -82,6 +99,8 @@ namespace game {
 			return (lhs.x * rhs.x) + (lhs.y * rhs.y);
 		};
 		auto adjacent_length = inner_product(p_vector, c_vector) / p_vector.length();
+
+		TODO("Optimise player collision calculation")
 		
 		//Which then means that trusty old pythagoras can get us the length of the opposite
 		
