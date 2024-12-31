@@ -99,6 +99,21 @@ namespace game {
 		auto inner_product = [](sf::Vector2f lhs, sf::Vector2f rhs) {
 			return (lhs.x * rhs.x) + (lhs.y * rhs.y);
 		};
+
+
+		//We know the length of a vector will be greater than 0.
+		//The compiler may not.
+		//The alternative in the name of "optimization" is to defer the division (which may feature a square root) later on.
+		//But, I have trouble with potentially-premature optimizations based on some suspicion that the compiler won't be able
+		//to do some good optimizing for me. If you start bisecting your equations because it makes things "faster" you rapidly 
+		//get to the point where you've gone from readable math to unreadable arcane runes.
+		//So instead, we give it the helping hand which the humans in the room already have and see what it can come up with.
+#ifdef _MSC_VER
+		//At time of writing, MSVC does not implement attribute assume
+		__assume(p_vector.length() > 0);
+#else
+		[[assume(p_vector.length() > 0)]]
+#endif
 		auto adjacent_length = inner_product(p_vector, c_vector) / p_vector.length();
 		
 		//Which then means that trusty old pythagoras can get us the length of the opposite
