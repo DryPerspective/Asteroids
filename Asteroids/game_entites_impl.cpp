@@ -18,6 +18,7 @@ thread_safe::uniform_generator prng_gen{};
 TODO("Replace asteroid circles with sprites")
 TODO("Shrink player")
 TODO("Check asteroid spawning")
+TODO("Make asteroid spawn time tick based?")
 
 namespace game {
 
@@ -521,31 +522,43 @@ namespace game {
 		*  They then head in a direction which is approximately towards the center of the screen.
 		*/
 		//First we grab a belt around the edges of the screen
-		auto [size_x, size_y] = m_window.get_size();
-		//And a position within it
-		auto x_rand{ prng_gen(0.0f, 10.0f) };
-		//We want them coming from all angles, so we cut the result in half
+		auto [bounds_x, bounds_y] = m_window.get_size();
+		//Either we'll be coming from the top or bottom, or from the left or right
 		float x_pos{};
-		if (x_rand < 5) {
-			x_pos = -x_rand;
-		}
-		else {
-			x_pos = size_x + x_rand;
-		}
-
-		auto y_rand{ prng_gen(0.0f, 10.0f) };
 		float y_pos{};
-		if (y_rand < 0.5) {
-			y_pos = -y_rand;
-		}
-		else {
-			y_pos = size_y + y_rand;
+		auto side_determinant = prng_gen(0, 3);
+		constexpr auto asteroid_displacement = asteroid::initial_asteroid_size * asteroid::size_scale_factor;
+		/*
+		*  Determinant maps:
+		*  0 => (0, ry)
+		*  1 => (bx, ry)
+		*  2 => (rx, 0)
+		*  3 => (rx, by)
+		*  Where bx,by are bounds and rx, ry are random
+		*/
+		switch (side_determinant) {
+		case 0:
+			y_pos = prng_gen(0.0f, static_cast<float>(bounds_y));
+			break;
+		case 1:
+			x_pos = static_cast<float>(bounds_x);
+			y_pos = prng_gen(0.0f, static_cast<float>(bounds_y));
+			break;
+		case 2:
+			x_pos = prng_gen(0.0f, static_cast<float>(bounds_x));
+			break;
+		case 3:
+			x_pos = prng_gen(0.0f, static_cast<float>(bounds_x));
+			y_pos = static_cast<float>(bounds_y);
+			break;
+		default:
+			std::unreachable();
 		}
 
 		sf::Vector2f pos{ x_pos, y_pos };
 
 		//Then we want a velocity which points towards the centre of the screen but is peturbed a little
-		sf::Vector2f velocity = sf::Vector2f{ static_cast<float>(size_x) / 2, static_cast<float>(size_y) / 2 } - pos.rotatedBy(sf::degrees(prng_gen(-30.0f, 30.0f)));
+		sf::Vector2f velocity = sf::Vector2f{ static_cast<float>(bounds_x) / 2, static_cast<float>(bounds_y) / 2 } - pos.rotatedBy(sf::degrees(prng_gen(-30.0f, 30.0f)));
 
 		m_incoming_asteroids.push(std::make_unique<game::asteroid>(sf::Vector2f{ x_pos, y_pos }, velocity.angle(), asteroid::initial_asteroid_size));
 
