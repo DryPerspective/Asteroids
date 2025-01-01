@@ -173,8 +173,38 @@ namespace game {
 
 	};
 
+	//We want to represent our asteroid with a vertexarray, but still be able to move and transform it like a shape
+	class asteroid_sprite : public sf::Drawable, public sf::Transformable {
+
+		static constexpr std::size_t num_vertices = 14;
+		float						 m_radius;
+		float						 m_rotation_factor;	//We want some of our asteroids to very slowly rotate
+
+		std::array<sf::Vertex, num_vertices>	m_vertices;
+
+		//Generate our sprite shape
+		std::array<sf::Vertex, num_vertices> generate_sprite(float scale_factor);
+
+		void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
+
+	public:
+		explicit asteroid_sprite();
+		explicit asteroid_sprite(float scale_factor);
+
+		asteroid_sprite(const asteroid_sprite&) = default;
+		asteroid_sprite& operator=(const asteroid_sprite&) = default;
+
+		asteroid_sprite(asteroid_sprite&&) noexcept = default;
+		asteroid_sprite& operator=(asteroid_sprite&&) noexcept = default;
+
+		float getRadius() const;
+
+		void move(sf::Vector2f offset);
+
+	};
+
 	export class asteroid : public entity {
-		thread_safe::shape<sf::CircleShape>		m_shape;
+		thread_safe::shape<asteroid_sprite>		m_shape;
 		std::atomic<int>						m_size;
 		std::atomic_flag						m_expired;
 
@@ -188,10 +218,9 @@ namespace game {
 		
 
 		explicit asteroid(sf::Vector2f initial_position, sf::Angle initial_angle, int initial_size) 
-			: entity{ sf::Vector2f{speed_scale_factor * max_speed, 0}.rotatedBy(initial_angle) }, m_shape{ static_cast<float>(size_scale_factor * initial_size) }, m_size{ initial_size }, m_expired{} {
+			: entity{ sf::Vector2f{speed_scale_factor * max_speed, 0}.rotatedBy(initial_angle) }, m_shape{ size_scale_factor * initial_size }, m_size{ initial_size }, m_expired{} {
 
 			m_shape.set_position(initial_position);
-			m_shape.set_origin({ m_shape.get_radius(), m_shape.get_radius() });
 		}
 
 		asteroid(const asteroid& other) : entity{ other.m_vel }, m_shape { other.m_shape }, m_size{ other.m_size.load()}, m_expired{} {

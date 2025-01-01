@@ -15,10 +15,9 @@ import polymorphic;
 //will be approximately equal to the lifetime of the program.
 thread_safe::uniform_generator prng_gen{};
 
-TODO("Replace asteroid circles with sprites")
 TODO("Shrink player")
-TODO("Check asteroid spawning")
-TODO("Make asteroid spawn time tick based?")
+
+
 
 namespace game {
 
@@ -217,6 +216,62 @@ namespace game {
 	void projectile::set_position(sf::Vector2f in) {
 		default_set_position(m_shape, in);
 	}
+
+	//ASTEROID SPRITE FUNCTIONS------------------------------------------------------
+	std::array<sf::Vertex, asteroid_sprite::num_vertices> asteroid_sprite::generate_sprite(float scale_factor) {
+		std::array sprite{
+			sf::Vertex{ {1.0f, 0.0f} },
+			sf::Vertex{ {0.866f, 0.5f} },
+			sf::Vertex{ {0.4f, 0.4f} },
+			sf::Vertex{ {0.5f, 0.866f} },
+			sf::Vertex{ {0.0f, 1.0f} },
+			sf::Vertex{ {-0.5f, 0.866f}},
+			sf::Vertex{ {-0.866f, 0.50f}},
+			sf::Vertex{ {-1.0f, 0.0f}},
+			sf::Vertex{ {-0.866f, -0.50f}},
+			sf::Vertex{ {-0.50f, -0.866f}},
+			sf::Vertex{ {0.0f, -1.0f} },
+			sf::Vertex{ {0.50f, -0.866f} },
+			sf::Vertex{ {0.866f, -0.50f} },
+			sf::Vertex{ {1.0f, 0.0f} }
+		};
+
+
+		for (auto& vertex : sprite) {
+			vertex.position *= scale_factor;
+		}
+
+
+		return sprite;
+	}
+	
+	void asteroid_sprite::draw(sf::RenderTarget& target, sf::RenderStates states) const {
+		// Apply transformations
+		states.transform *= getTransform();
+		target.draw(m_vertices.data(), m_vertices.size(), sf::PrimitiveType::LineStrip, states);
+	}
+
+	//We can't split into one constructor because we need to refer to the constants in asteroid, so we delegate instead.
+	asteroid_sprite::asteroid_sprite(float scale_factor) 
+		: m_vertices{ generate_sprite(scale_factor) }, m_radius{ scale_factor }, m_rotation_factor{} {
+
+		auto rotate_num{ prng_gen(0.5f) };
+		//We want about half of our asteroids to not rotate at all
+		if (rotate_num < 0.25f) m_rotation_factor = rotate_num;
+
+		rotate(sf::degrees(360 / 0.5f * rotate_num));
+	}
+	asteroid_sprite::asteroid_sprite() : asteroid_sprite(asteroid::size_scale_factor* asteroid::initial_asteroid_size) {}
+
+	float asteroid_sprite::getRadius() const {
+		return m_radius;
+	}
+
+	void asteroid_sprite::move(sf::Vector2f offset) {
+		sf::Transformable::move(offset);
+		rotate(sf::degrees(m_rotation_factor));
+	}
+
 
 	//ASTEROID FUNCTIONS-------------------------------------------------------------
 
