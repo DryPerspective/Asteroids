@@ -15,9 +15,6 @@ import polymorphic;
 //will be approximately equal to the lifetime of the program.
 thread_safe::uniform_generator prng_gen{};
 
-TODO("Shrink player")
-
-
 
 namespace game {
 
@@ -357,11 +354,15 @@ namespace game {
 
 		sf::ConvexShape player{};
 		player.setPointCount(4);
-		player.setPoint(0, { 50, 0 });
-		player.setPoint(1, { 60, -30 });
+		player.setPoint(0, { 20, 0 });
+		player.setPoint(1, { 24, -12 });
 		player.setPoint(2, { 0, 0 });
-		player.setPoint(3, { 60, 30 });
-		player.setOrigin({ 40, 0 });
+		player.setPoint(3, { 24, 12 });
+		player.setOrigin({ 16, 0 });
+		player.setFillColor(sf::Color::Black);
+		player.setOutlineThickness(2);
+		player.setOutlineColor(sf::Color::White);
+		
 		return player;
 	}
 
@@ -393,17 +394,12 @@ namespace game {
 
 	void player::tick(game::data& dat) {
 
-		auto transformed_point = [this](std::size_t idx) {
-			return m_shape.get_transform().transformPoint(m_shape.get_point(idx));
-		};
-
-
 		if(dat.game_is_over()) return;
 
 		auto _{ std::lock_guard{m_mut} };
 
 		//The max speed of the player is 95% that of the maximum allowed by the game
-		const bool under_max_speed = m_vel.length() <= max_speed * 0.95f;
+		const bool under_max_speed = m_vel.length() <= max_speed * 0.75f;
 
 		//One could argue that this is TOCTOU, but I would prefer each tick to operate on a consistent
 		//snapshot of one moment as it is/was at the time the function was called, rather than

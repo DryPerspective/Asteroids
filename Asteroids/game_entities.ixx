@@ -314,7 +314,7 @@ namespace game {
 
 		static sf::ConvexShape create_player();
 		static constexpr auto time_between_shots{ std::chrono::milliseconds{300} };
-		static constexpr float speed_scale_factor{ 1.0f };
+		static constexpr float speed_scale_factor{ 0.7f };
 		static constexpr float initial_speed{ 30 };
 		static constexpr auto turn_angle{ sf::degrees(3) };
 
