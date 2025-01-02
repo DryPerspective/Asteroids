@@ -128,12 +128,11 @@ int main()
     unsigned int win_x{ 500 };
     unsigned int win_y{ 500 };
 
-    sf::RenderWindow main_window{ sf::VideoMode({win_x, win_y}), "My Window" };
+    sf::RenderWindow main_window{ sf::VideoMode({win_x, win_y}), "Asteroids" };
     main_window.setFramerateLimit(120);
-    //main_window.setKeyRepeatEnabled(false);
 
-    game::data dat{ std::move(main_window) };
-    game::player p({ 100, 100 }, dat);
+    game::data game_data{ std::move(main_window) };
+    game::player player({ 100, 100 }, game_data);
 
     thread_safe::queue<player_keys> control_input{};
 
@@ -146,16 +145,16 @@ int main()
             //If we're in time for a tick
             control_input.wait_pop(key);
             if (key == player_keys::eof) return;
-            translate_keypress_to_player_action(p, key);
+            translate_keypress_to_player_action(player, key);
         }
     } };
 
-    std::jthread spawn_asteroids{ [&dat, &starting_line](std::stop_token tok) {
+    std::jthread spawn_asteroids{ [&game_data, &starting_line](std::stop_token tok) {
         std::mt19937 mt{ std::random_device{}() };
         std::uniform_int_distribution dist{ 1000, 2000 };
         starting_line.arrive_and_wait();
-        while (!tok.stop_requested() && !dat.game_is_over()) {
-            dat.add_asteroid();
+        while (!tok.stop_requested() && !game_data.game_is_over()) {
+            game_data.add_asteroid();
             std::this_thread::sleep_for(std::chrono::milliseconds{ dist(mt) });
         }
     }};
@@ -165,12 +164,12 @@ int main()
     starting_line.arrive_and_wait();
     auto loop_start = std::chrono::steady_clock::now();
 
-    while (++tick_count, dat.is_open()) {
+    while (++tick_count, game_data.is_open()) {
         
-        while (const auto event = dat.poll_event()) {
+        while (const auto event = game_data.poll_event()) {
             if (event->getIf<sf::Event::Closed>()) {
                 control_input.push(player_keys::eof);
-                dat.close();
+                game_data.close();
                 break;
             }
             if (auto key = event->getIf<sf::Event::KeyPressed>()) {
@@ -185,22 +184,22 @@ int main()
         
         
 
-        dat.clear(sf::Color::Black);
+        game_data.clear(sf::Color::Black);
 
         
-        p.draw(dat);
+        player.draw(game_data);
 
 
-        dat.draw_all();
+        game_data.draw_all();
 
-        dat.display();
+        game_data.display();
 
         if (std::chrono::steady_clock::now() - loop_start > tick_interval) {
             loop_start = std::chrono::steady_clock::now();
 
-            p.tick(dat);
-            dat.kill_expired();
-            dat.tick();
+            player.tick(game_data);
+            game_data.kill_expired();
+            game_data.tick();
         }
 
         //std::println("{}", dat.num_entities());

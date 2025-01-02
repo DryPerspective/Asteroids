@@ -3,8 +3,6 @@ module;
 //In theory not necessarily since it's in the global fragment elsewhere, but MSVC complains
 #include "SFML/Graphics.hpp"
 
-#include "todo_reminder.h"
-
 module game_entities;
 
 import ts_prng;
@@ -243,7 +241,7 @@ namespace game {
 	}
 	
 	void asteroid_sprite::draw(sf::RenderTarget& target, sf::RenderStates states) const {
-		// Apply transformations
+		//Apply transformations
 		states.transform *= getTransform();
 		target.draw(m_vertices.data(), m_vertices.size(), sf::PrimitiveType::LineStrip, states);
 	}
